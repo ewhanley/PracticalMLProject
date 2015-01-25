@@ -1,0 +1,100 @@
+---
+title: "Coursera Practical Machine Learning"
+output: html_document
+---
+
+## Executive Summary
+
+This is an analysis completed to fulfill the requirements of the final project for Practical Machine Learning course in the Coursera Data Science Specialization.  The goal of the analysis is to classify the way in which various exercises were completed based on data from accelerometers on the belt, forearm, arm, and dumbell of six participants.  The final selected model implemented a random forest algorithm and successfully prediced all 20 test cases.
+
+### Project Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+### Review, Clean, and Partition Data
+
+``` {r include=FALSE}
+library(caret)
+library(doMC)
+set.seed(406)
+```
+
+Data sets were saved to local directory and read into R:
+
+```{r}
+trainingSet <- read.csv("pml-training.csv", stringsAsFactors = TRUE)
+testingSet <- read.csv("pml-testing.csv", stringsAsFactors = TRUE)
+```
+
+A quick review of the data indicates that there are several variables the majority of whose observations are NAs, empty character strings, or metadata such as timestamps and participant name.  I have chosen to remove all of these columns from the training set:
+
+```{r}
+metaDataId <- c("X", "user", "raw", "cvtd", "new", "num", "kurtosis", "skewness", "max", "min", "amplitude")
+columnSelect <- setdiff(names(trainingSet), grep(paste(metaDataId,collapse="|"), names(trainingSet), value=TRUE))
+trainingClean <- subset(trainingSet, select=columnSelect)
+trainingClean <- trainingClean[, colSums(is.na(trainingClean))==0]
+```
+
+Finally, I partitioned the training data into training (60% of observations) and testing (40% of observations).  Partitioning relies on the caret package.
+
+```{r}
+inTrain <- createDataPartition(y=trainingClean[,1], p=0.6, list=FALSE)
+training <- trainingClean[inTrain,]
+testing <- trainingClean[-inTrain,]
+dim(training); dim(testing)
+```
+
+### Model Selection
+
+I tried both a random forest and a random forest variant using conditional inference trees.  Both models implemented five fold cross validation and used the doMC parallel processing package to reduce run times.
+
+``` {r, cache=TRUE, message=FALSE, warning=FALSE}
+registerDoMC(cores = 4) # Distribute processing across 4 cores
+ctrl <- trainControl(method = "cv",number = 5) # 5 fold cross validation
+model_randomForest <- train(training[,1:52], training[,53],  method = "rf", trControl = ctrl)
+pred_rf <- predict(model_randomForest, testing)
+print(model_randomForest)
+```
+
+Based on the cross validation, the out of sample error for the random forest is ~1%.
+
+``` {r, cache=TRUE, message=FALSE, warning=FALSE}
+model_cforest <- train(training[,1:52], training[,53], method = "cforest", trControl = ctrl)
+pred_cforest <- predict(model_cforest, testing)
+print(model_cforest)
+```
+
+Based on the cross validation, the out of sample error for the cforest is ~5%.
+
+I compared the prediction performance of the two models on the testing partition.
+
+``` {r}
+prop.table(table(pred_rf == testing$classe))
+prop.table(table(pred_cforest == testing$classe))
+```
+
+The random forest model was markedly better, so I used it to make my predictions for the assignment submission.
+
+### Assignment Submission
+
+``` {r, message=FALSE}
+metaDataId <- c("X", "user", "raw", "cvtd", "new", "num", "kurtosis", "skewness", "max", "min", "amplitude")
+columnSelect <- setdiff(names(testingSet), grep(paste(metaDataId,collapse="|"), names(testingSet), value=TRUE))
+validateSet <- subset(testingSet, select=columnSelect)
+validateSet <- validateSet[, colSums(is.na(validateSet))==0]
+
+pred_rf_validation <- predict(model_randomForest, validateSet)
+
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(pred_rf_validation)
+```
+
+The model correctly predicted all twenty of the test cases.
+
